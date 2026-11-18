@@ -1,11 +1,12 @@
-# Ruptura
+# Ruptura - pacote oficial
+Identificador-base: RUPTURA-OFICIAL-20261118-V1
 
-Versao oficial: RUPTURA-OFICIAL-20261118-V1
+Inclui:
+- Estoque por Equipe sem filtro Cluster.
+- Tabela Auxiliar como referencia mestre de SAP/EPO/Subcluster/Municipio.
+- VGA SAT normalizada na exibicao para VGA, preservando codigos SAP.
+- Persistencia local da ultima analise validada.
+- Historico de data/hora e nomes das quatro bases.
+- Botao GitHub Actions.
 
-Dashboard HTML pronto para publicacao no GitHub Pages.
-
-## Atualizacao
-Na pagina Analista, carregue as quatro bases e use `Validar analise`. A ultima analise validada fica persistida no navegador (localStorage), com data/hora e historico das validacoes. Novos arquivos so substituem a base persistida apos uma nova validacao bem-sucedida.
-
-## GitHub Actions
-A pagina Analista contem acesso direto ao GitHub Actions do repositorio.
+Observacao: a persistencia do navegador nao publica arquivos no repositorio. Uma futura automacao de commit/Actions exige integracao autenticada com GitHub.
