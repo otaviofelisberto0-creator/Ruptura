@@ -1,4 +1,5 @@
 name: Publicar bases da Release
+run-name: Publicar bases ${{ inputs.tag }}
 
 on:
   workflow_dispatch:
@@ -12,9 +13,8 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  publicar:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,16 +22,33 @@ jobs:
       - name: Validar JSONs
         run: |
           for f in painel_autonomia.json reserva_sc.json reserva_pr.json controle_equipe.json metadata.json; do
-            if [ ! -f "release-data/$f" ]; then
-              echo "ERRO: release-data/$f nao encontrado"
-              exit 1
-            fi
-
+            test -f "release-data/$f" || { echo "ERRO: release-data/$f nao encontrado"; exit 1; }
             python -m json.tool "release-data/$f" > /dev/null
             echo "OK: $f"
           done
 
-      - name: Criar Release com as bases
+      - name: Sincronizar JSONs para data
+        run: |
+          mkdir -p data
+          cp release-data/painel_autonomia.json data/
+          cp release-data/reserva_sc.json data/
+          cp release-data/reserva_pr.json data/
+          cp release-data/controle_equipe.json data/
+          cp release-data/metadata.json data/
+
+      - name: Publicar data na principal
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "data ja esta atualizada"
+          else
+            git commit -m "Atualizar bases oficiais ${{ inputs.tag }}"
+            git push origin HEAD:principal
+          fi
+
+      - name: Criar Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
@@ -43,4 +60,4 @@ jobs:
             release-data/controle_equipe.json \
             release-data/metadata.json \
             --title "Bases Ruptura $TAG" \
-            --notes "Bases validadas do Dashboard Ruptura."
+            --notes "Bases validadas e sincronizadas para GitHub Pages."
