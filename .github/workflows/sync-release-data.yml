@@ -1,32 +1,46 @@
-name: Sincronizar dados da Release
+name: Sincronizar Release e publicar Pages
 
 run-name: >-
-  Sincronizar Release para análise - ${{ github.event_name }}
+  Sincronizar Release e publicar site - ${{ github.event_name }}
 
 on:
-  # Execução automática a cada 15 minutos,
-  # nos minutos 07, 22, 37 e 52.
+  # Verificação automática nos minutos 07, 22, 37 e 52
   schedule:
     - cron: "7,22,37,52 * * * *"
 
-  # Mantém o botão manual para contingência e testes.
+  # Publica novamente quando o index ou o workflow for alterado
+  push:
+    branches:
+      - main
+    paths:
+      - "index.html"
+      - "README.md"
+      - ".github/workflows/sync-release-data.yml"
+
+  # Mantém o botão manual para testes e contingência
   workflow_dispatch:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
-  group: sincronizar-release-data
+  group: ruptura-release-pages
   cancel-in-progress: false
 
 jobs:
   sincronizar:
-    name: Ler Release e carregar dados para análise
+    name: Ler Release, atualizar dados e preparar site
     runs-on: ubuntu-latest
+
+    outputs:
+      release_tag: ${{ steps.release.outputs.tag }}
+      changed: ${{ steps.changes.outputs.changed }}
 
     steps:
       # ============================================================
-      # 1. BAIXAR A BRANCH OFICIAL
+      # 1. CHECKOUT DA BRANCH OFICIAL
       # ============================================================
       - name: Checkout da main
         uses: actions/checkout@v4
@@ -45,10 +59,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          TAG="$(gh release view \
-            --repo "${GITHUB_REPOSITORY}" \
-            --json tagName \
-            --jq '.tagName')"
+          TAG="$(
+            gh release view \
+              --repo "${GITHUB_REPOSITORY}" \
+              --json tagName \
+              --jq '.tagName'
+          )"
 
           if [ -z "$TAG" ]; then
             echo "ERRO: nenhuma Release publicada foi encontrada."
@@ -72,7 +88,7 @@ jobs:
           echo "Pasta temporaria preparada."
 
       # ============================================================
-      # 4. BAIXAR OS JSONS DA RELEASE MAIS RECENTE
+      # 4. BAIXAR OS JSONS DA RELEASE
       # ============================================================
       - name: Baixar arquivos da Release
         shell: bash
@@ -104,7 +120,7 @@ jobs:
           ls -lh release-download/
 
       # ============================================================
-      # 5. CONFIRMAR ARQUIVOS OBRIGATORIOS
+      # 5. CONFIRMAR OS ARQUIVOS OBRIGATORIOS
       # ============================================================
       - name: Confirmar arquivos obrigatorios
         shell: bash
@@ -164,16 +180,14 @@ jobs:
             caminho="release-download/$arquivo"
 
             echo "Validando $arquivo..."
-
             python -m json.tool "$caminho" > /dev/null
-
             echo "JSON valido: $arquivo"
           done
 
           echo "Todos os JSONs foram validados."
 
       # ============================================================
-      # 7. COPIAR OS ARQUIVOS PARA DATA
+      # 7. ATUALIZAR A PASTA DATA
       # ============================================================
       - name: Atualizar pasta data
         shell: bash
@@ -188,13 +202,13 @@ jobs:
           cp release-download/controle_equipe.json data/
           cp release-download/metadata.json data/
 
-          echo "Arquivos copiados para data/."
+          echo "Arquivos copiados para data/:"
           ls -lh data/
 
       # ============================================================
-      # 8. VERIFICAR SE EXISTEM ALTERACOES REAIS
+      # 8. VERIFICAR ALTERACOES REAIS
       # ============================================================
-      - name: Verificar alterações
+      - name: Verificar alteracoes
         id: changes
         shell: bash
         run: |
@@ -216,7 +230,7 @@ jobs:
           fi
 
       # ============================================================
-      # 9. PUBLICAR OS DADOS NA MAIN
+      # 9. SALVAR OS NOVOS DADOS NA MAIN
       # ============================================================
       - name: Publicar dados na main
         if: steps.changes.outputs.changed == 'true'
@@ -238,32 +252,65 @@ jobs:
           echo "Dados da Release $RELEASE_TAG publicados na main."
 
       # ============================================================
-      # 10. INFORMAR QUANDO NAO HOUVER NOVA BASE
+      # 10. VALIDAR ARQUIVOS PARA O SITE
       # ============================================================
-      - name: Dados já atualizados
-        if: steps.changes.outputs.changed == 'false'
+      - name: Validar estrutura do site
         shell: bash
-        env:
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
-          echo "Nenhuma atualizacao necessaria."
-          echo "A Release $RELEASE_TAG ja esta carregada em data/."
+          set -euo pipefail
+
+          if [ ! -f "index.html" ]; then
+            echo "ERRO: index.html nao encontrado na raiz."
+            exit 1
+          fi
+
+          arquivos=(
+            "data/painel_autonomia.json"
+            "data/reserva_sc.json"
+            "data/reserva_pr.json"
+            "data/controle_equipe.json"
+            "data/metadata.json"
+          )
+
+          for arquivo in "${arquivos[@]}"; do
+            if [ ! -s "$arquivo" ]; then
+              echo "ERRO: $arquivo nao existe ou esta vazio."
+              exit 1
+            fi
+          done
+
+          echo "Estrutura do site validada."
 
       # ============================================================
-      # 11. RESUMO NO GITHUB ACTIONS
+      # 11. CONFIGURAR O GITHUB PAGES
       # ============================================================
-      - name: Criar resumo da execução
+      - name: Configurar GitHub Pages
+        uses: actions/configure-pages@v5
+
+      # ============================================================
+      # 12. EMPACOTAR O SITE
+      # ============================================================
+      - name: Enviar artefato do GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "."
+
+      # ============================================================
+      # 13. RESUMO DA SINCRONIZACAO
+      # ============================================================
+      - name: Criar resumo da sincronizacao
         if: always()
         shell: bash
         run: |
           {
-            echo "## Sincronização das bases do Ruptura"
+            echo "## Ruptura - sincronização"
             echo ""
             echo "- **Branch oficial:** main"
             echo "- **Release lida:** ${{ steps.release.outputs.tag }}"
             echo "- **Evento:** ${{ github.event_name }}"
-            echo "- **Alteração encontrada:** ${{ steps.changes.outputs.changed }}"
-            echo "- **Destino:** data/"
+            echo "- **Dados alterados:** ${{ steps.changes.outputs.changed }}"
+            echo "- **Destino dos JSONs:** data/"
+            echo "- **Artefato do Pages:** preparado"
             echo ""
             echo "### Arquivos processados"
             echo ""
@@ -272,4 +319,32 @@ jobs:
             echo "- reserva_pr.json"
             echo "- controle_equipe.json"
             echo "- metadata.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ==============================================================
+  # 14. PUBLICAR O SITE NO GITHUB PAGES
+  # ==============================================================
+  publicar:
+    name: Publicar dashboard no GitHub Pages
+    needs: sincronizar
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Publicar no GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Criar resumo da publicacao
+        shell: bash
+        run: |
+          {
+            echo "## Ruptura - publicação concluída"
+            echo ""
+            echo "- **Release utilizada:** ${{ needs.sincronizar.outputs.release_tag }}"
+            echo "- **Dados alterados:** ${{ needs.sincronizar.outputs.changed }}"
+            echo "- **Site:** ${{ steps.deployment.outputs.page_url }}"
           } >> "$GITHUB_STEP_SUMMARY"
