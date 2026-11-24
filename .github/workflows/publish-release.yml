@@ -1,11 +1,12 @@
 name: Publicar bases da Release
+
 run-name: Publicar bases ${{ inputs.tag }}
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag nova, exemplo: dados-2026-11-18-1500"
+        description: "Tag nova, exemplo: dados-2026-11-24-1110"
         required: true
         type: string
 
@@ -15,6 +16,7 @@ permissions:
 jobs:
   publicar:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,7 +24,11 @@ jobs:
       - name: Validar JSONs
         run: |
           for f in painel_autonomia.json reserva_sc.json reserva_pr.json controle_equipe.json metadata.json; do
-            test -f "release-data/$f" || { echo "ERRO: release-data/$f nao encontrado"; exit 1; }
+            test -f "release-data/$f" || {
+              echo "ERRO: release-data/$f nao encontrado"
+              exit 1
+            }
+
             python -m json.tool "release-data/$f" > /dev/null
             echo "OK: $f"
           done
@@ -36,16 +42,18 @@ jobs:
           cp release-data/controle_equipe.json data/
           cp release-data/metadata.json data/
 
-      - name: Publicar data na principal
+      - name: Publicar data na main
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add data/
+
           if git diff --cached --quiet; then
             echo "data ja esta atualizada"
           else
             git commit -m "Atualizar bases oficiais ${{ inputs.tag }}"
-            git push origin HEAD:principal
+            git push origin HEAD:main
           fi
 
       - name: Criar Release
