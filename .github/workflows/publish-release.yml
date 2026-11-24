@@ -1,71 +1,83 @@
 name: Publicar bases da Release
 
-run-name: Publicar bases ${{ inputs.tag }}
+run-name: >-
+  Publicar bases ${{ github.event_name == 'workflow_dispatch'
+    && 'manual'
+    || 'automaticamente' }}
 
 on:
+  # Automático:
+  # executa somente quando algo dentro de release-data muda na main
+  push:
+    branches:
+      - main
+    paths:
+      - "release-data/**"
+
+  # Contingência:
+  # mantém o botão para executar manualmente quando necessário
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag nova, exemplo: dados-2026-11-24-1110"
-        required: true
-        type: string
 
 permissions:
   contents: write
 
+# Impede duas publicações do Ruptura ao mesmo tempo
+concurrency:
+  group: publicar-bases-ruptura
+  cancel-in-progress: false
+
 jobs:
   publicar:
+    name: Validar e publicar bases
     runs-on: ubuntu-latest
 
     steps:
+      # ============================================================
+      # 1. CHECKOUT DA BRANCH MAIN
+      # ============================================================
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
-      - name: Validar JSONs
+      # ============================================================
+      # 2. VALIDAR ARQUIVOS OBRIGATORIOS
+      # ============================================================
+      - name: Validar arquivos obrigatorios
+        shell: bash
         run: |
-          for f in painel_autonomia.json reserva_sc.json reserva_pr.json controle_equipe.json metadata.json; do
-            test -f "release-data/$f" || {
+          set -euo pipefail
+
+          arquivos=(
+            "painel_autonomia.json"
+            "reserva_sc.json"
+            "reserva_pr.json"
+            "controle_equipe.json"
+            "metadata.json"
+          )
+
+          echo "=========================================="
+          echo "VALIDANDO BASES DO RUPTURA"
+          echo "=========================================="
+
+          for f in "${arquivos[@]}"; do
+
+            if [ ! -f "release-data/$f" ]; then
               echo "ERRO: release-data/$f nao encontrado"
               exit 1
-            }
+            fi
 
-            python -m json.tool "release-data/$f" > /dev/null
-            echo "OK: $f"
+            echo "Validando JSON: $f"
+
+            python -m json.tool \
+              "release-data/$f" \
+              > /dev/null
+
+            tamanho=$(du -h "release-data/$f" | cut -f1)
+
+            echo "OK: $f - $tamanho"
           done
 
-      - name: Sincronizar JSONs para data
-        run: |
-          mkdir -p data
-          cp release-data/painel_autonomia.json data/
-          cp release-data/reserva_sc.json data/
-          cp release-data/reserva_pr.json data/
-          cp release-data/controle_equipe.json data/
-          cp release-data/metadata.json data/
-
-      - name: Publicar data na main
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add data/
-
-          if git diff --cached --quiet; then
-            echo "data ja esta atualizada"
-          else
-            git commit -m "Atualizar bases oficiais ${{ inputs.tag }}"
-            git push origin HEAD:main
-          fi
-
-      - name: Criar Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
-        run: |
-          gh release create "$TAG" \
-            release-data/painel_autonomia.json \
-            release-data/reserva_sc.json \
-            release-data/reserva_pr.json \
-            release-data/controle_equipe.json \
-            release-data/metadata.json \
-            --title "Bases Ruptura $TAG" \
-            --notes "Bases validadas e sincronizadas para GitHub Pages."
+          echo "=========================================="
+          echo "
